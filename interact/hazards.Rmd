@@ -1,0 +1,424 @@
+---
+title: "Hazards"
+date: "Generated: `r Sys.Date()`"
+runtime: shiny
+output:
+    html_document:
+        toc: true
+        toc_depth: 3
+        theme: spacelab
+        highlight: zenburn
+        number_sections: false
+---
+
+```{r global_opts, include=FALSE}
+
+knitr::opts_chunk$set(fig.path="Figs/", echo=FALSE, warning=FALSE,
+                      message=FALSE, dev='svg')
+
+```
+
+-------
+
+# Info
+* [code](https://github.com/nverno/hazards)
+
+Simple logistic models to predict death.
+
+-------
+
+# Moose Data
+`DIED` variable is all trees that were alive in first census period and __not reported__ as alive in next period.  `rDIED` variable is all trees that were actually __reported__ to have status "DEAD" or "PD".
+
+```{r summary}
+library(ggplot2)
+library(GGally)
+library(dplyr)
+library(grid)
+library(reshape2)
+source("setup.R", chdir=T)
+
+cols <- c("#A60628", "#348ABD")
+specs <- levels(pp$SPEC)[!(levels(pp$SPEC) %in% c("", "UNID"))]
+diedCols <- c("DIED", "rDIED")
+
+inputPanel(
+    checkboxGroupInput("spec", "Species:", choices=specs, selected=c("ABBA"), inline=TRUE),
+    checkboxGroupInput("times", "Time Periods:", choices=c(86, 87, 98), selected=c(98), 
+                       inline=TRUE),
+    checkboxGroupInput("groups", "Split Table:", choices=c("SPEC", "YEAR", "ASPCL", "ELEVCL", "PPLOT"),
+                       selected=c("SPEC", "YEAR"), inline=TRUE),
+    checkboxInput("treesOnly", "Trees >=5cm Only")
+)
+
+getData <- reactive({
+    inds <- pp$SPEC %in% input$spec & pp$YEAR %in% input$times
+    if (input$treesOnly)
+        inds <- inds & !is.na(pp$DBH) & pp$DBH >= 5
+    droplevels(pp[inds, ])
+})
+
+actionButton("deathSummary", "Show Summary of Deaths")
+
+renderTable({
+    if (input$deathSummary %% 2) {
+        dname <- ifelse (input$treesOnly, "Total(>=5cm)", "Total")
+        dat <- getData()
+        props <- dat %>% group_by_(.dots=input$groups) %>%
+          dplyr::summarize(
+              "Died" = as.integer(sum(DIED, na.rm=T)),
+              "Total" = n(),
+              "Died(%)" = mean(DIED, na.rm=T),
+              "rDied(%)" = mean(rDIED, na.rm=T))
+        props
+    }
+})
+
+summPlot <- renderPlot({
+    dat <- getData()
+    dcols <- c("dp", "rdp")[c("DIED", "rDIED") %in% input$summDvar]
+    svars <- c("SPEC", input$summGroup)
+    if (input$summSplit) svars <- unique(c(svars, input$summFacet))
+    props <- dat %>% 
+      group_by_(.dots=as.list(svars)) %>%
+      dplyr::summarize(dp = mean(DIED, na.rm=T),
+                       rdp = mean(rDIED, na.rm=T))
+    props <- melt(props, id.vars = svars)
+    props <- props[props$variable %in% dcols, ]
+    p <- ggplot(props, aes_string(input$summGroup, "value", group="SPEC", shape="variable", color="SPEC")) + 
+      geom_point() + theme_bw() +
+      ylab("Proportion Died") +
+      scale_shape_discrete(name="Died Variable", labels=c("DIED", "rDIED"))
+    if (input$summPath)
+        p <- p + geom_path(aes(group=interaction(SPEC, variable)), arrow=arrow())
+    if (input$summSplit) 
+        p <- p + facet_grid(as.formula(paste("~ ", input$summFacet)))
+    p
+})
+
+shinyUI(fluidPage(
+    titlePanel("Deaths Summary Figures"),
+    sidebarLayout( 
+        sidebarPanel(
+            checkboxGroupInput("summDvar", "Died variable:", choices=c("DIED", "rDIED"), 
+                               selected="DIED", inline=T),
+            radioButtons("summGroup", "Groups:", 
+                         choices=c("PPLOT","ASPCL","ELEVCL","YEAR"), 
+                         selected=c("YEAR"), inline=T),
+            checkboxInput("summPath", "Add Path"),
+            checkboxInput("summSplit", "Split Graphs"),
+            conditionalPanel(
+                condition = "input.summSplit == true",
+                radioButtons("summFacet", "Facets:", choices=c("YEAR", "ELEVCL", "ASPCL", "PPLOT"), 
+                             selected=NULL, inline=TRUE)
+            )
+        ),
+        mainPanel(
+            summPlot
+        )
+    )
+))
+
+```
+
+-------
+
+# Plot-Variable Correlations
+
+```{r plot_corrs}
+
+corrHist <- renderPlot({
+    dat <- getData()
+    hist(dat[, input$corrVar], main=paste("Histogram of", input$corrVar),
+         xlab=input$corrVar)
+})
+
+corrGroups <- renderPlot({
+    dat <- getData()
+    dat <- dat[dat$PPLOT %in% input$corrPlots, ]
+    p <- ggplot(dat, aes_string(input$corrVar)) + geom_histogram()
+    if (input$corrRotate)
+        p <- p + facet_grid(~ PPLOT)
+    else
+        p <- p + facet_grid(PPLOT ~ .)
+    p
+})
+
+corrPairs <- renderPlot({
+    dat <- getData()
+    dat <- dat[dat$PPLOT == input$pairPlot, input$pairVars]
+    ggpairs(dat, upper=list(continuous="density"),
+            lower = list(combo="facetdensity")) + theme_bw()
+})
+
+shinyUI(fluidPage(
+    titlePanel("Correlations between PPLOT and variables"),
+    sidebarLayout(
+        sidebarPanel(
+            conditionalPanel(
+                condition = "input.corrTabs == 'Histogram' || input.corrTabs == 'Split'",
+                radioButtons("corrVar", "Variable:", choices=names(pp), 
+                             selected="BA", inline=TRUE),
+                conditionalPanel(
+                    condition = "input.corrTabs == 'Split'",
+                    checkboxGroupInput("corrPlots", "Plots:", choices=levels(pp$PPLOT), 
+                                       selected=c(4,5,6), inline=TRUE),
+                    checkboxInput("corrRotate", "Rotate Split")
+                )
+            ),
+            conditionalPanel(
+                condition = "input.corrTabs == 'Pairwise'",
+                radioButtons("pairPlot", "Plot:", choices=levels(pp$PPLOT), 
+                             selected=4, inline=TRUE),
+                checkboxGroupInput("pairVars", "Variables:", choices=names(pp), 
+                             selected=c("HT","BA"), inline=TRUE)
+            )
+        ),
+        mainPanel(
+            tabsetPanel(
+                id = "corrTabs",
+                tabPanel("Histogram", corrHist),
+                tabPanel("Split", corrGroups),
+                tabPanel("Pairwise", corrPairs)
+            )
+        )
+    )
+))
+
+```
+
+
+-------
+
+# Simulating Data
+
+## Right-censored
+
+* Simulate some lifetimes (exponential, gamma)
+* Simulate some termination (censoring) times (uniform)
+
+Simulate some right-censored data.  Lifetimes for two groups from __exponential__ distributions with different rate paramters.  Censoring times are generated from a __uniform__ distribution, with a lower bound set to the mean of the first groups distribution (1/Rate1):
+```{r simulate_data}
+library(survival)
+data(aml)
+
+inputPanel(
+    numericInput("rightSimN", "Number of Samples (per group):", 50, 25, 100),
+    numericInput("rightSimRate1", "Rate (Group 1):", 0.2, 0.05, 0.95),
+    numericInput("rightSimRate2", "Rate (Group 2):", 0.1, 0.05, 0.95),
+    checkboxInput("rightSimSumm", "Summary Table")
+)
+
+rightSimData <- reactive({
+    lifetimes <- c(rexp(ceiling(input$rightSimN), rate=input$rightSimRate1),
+                    rexp(ceiling(input$rightSimN), rate=input$rightSimRate2))
+    censtimes <- rep(1/input$rightSimRate1*(1 + runif(input$rightSimN)), 2)
+    ztimes <- pmin(lifetimes, censtimes)
+    status <- as.numeric(censtimes > lifetimes)
+    group <- factor(rep(c(1,2), each=input$rightSimN))
+    data.frame(lifetimes=lifetimes, censtimes=censtimes, ztimes=ztimes, 
+             group=group, status=status)
+})
+
+fluidRow(
+    actionButton("rightSimTable", "Show Some Simulation Data"),
+    actionButton("runRightSim", "Run Right-censored Simulation",
+                 style="background:red; color:black; font-weight:bold")
+)
+
+renderTable({
+    if (input$runRightSim & input$rightSimTable %% 2){
+        dat <- rightSimData()
+        if (input$rightSimSumm)
+            summary(dat)
+        else head(dat)
+     }
+})
+
+rightSimFit <- reactive({
+    if (input$runRightSim) {
+        dat <- rightSimData() 
+        survfit(Surv(dat$ztimes, dat$status) ~ dat$group,
+                conf.int=input$rightCI, conf.type=input$rightCItype)
+    }    
+})
+
+rightKM <- renderPlot({
+    if (input$runRightSim) {
+        fit <- isolate(rightSimFit())
+        dat <- rightSimData()
+        plot(fit, main=paste("Kaplan-Meier with", round(input$rightCI, 2), 
+                      "confidence bands"))
+        if (input$rightAddConf) {
+            for (i in 1:2) {
+                lines(fit$time[dat$group==i], fit$upper[dat$group==i], lty=3, type="s")
+                lines(fit$time[dat$group==i], fit$lower[dat$group==i], lty=3, type="s")
+            }
+        }
+    }
+})
+
+rightKMresultsFull <- renderPrint({
+    if (input$runRightSim) {
+        fit <- isolate(rightSimFit())
+        summary(fit)
+    }
+})
+
+rightKMresults <- renderPrint({c
+    if (input$runRightSim) {
+        fit <- isolate(rightSimFit())
+        fit
+    }
+})
+
+rightKMcompare <- renderPrint({
+    if (input$runRightSim) {
+        dat <- isolate(rightSimData())
+        fit <- survdiff(Surv(dat$ztimes, dat$status) ~ dat$group)
+        fit
+    }
+})
+
+shinyUI(fluidPage(
+    titlePanel("Right-Censored Simulated Data"),
+    sidebarLayout(
+        sidebarPanel(
+            sliderInput("rightCI", "Conf. level:", min=0.5, max=0.99, value=0.95),
+            radioButtons("rightCItype", "Conf. Type:", choices=c("plain","log","log-log"), 
+                         selected=NULL, inline=TRUE),
+            conditionalPanel(
+                condition = "input.rightSimTabs == 'Kaplan-Meier'",
+                checkboxInput("rightAddConf", "Show Conf. Bands")
+            )
+	),
+        mainPanel(
+            tabsetPanel(
+                id = "rightSimTabs",
+                tabPanel("Kaplan-Meier", rightKM),
+                tabPanel("Results", rightKMresults),
+                tabPanel("Full Results", rightKMresultsFull),
+                tabPanel("Compare Groups", rightKMcompare)
+            )
+        )
+    )
+))
+```
+
+```{r test}
+library(survival)
+lifetimes <- c(rexp(25, rate=0.2), rexp(25, rate=0.1))
+censtimes <- rep(5 * (1 + runif(25)), 2)
+ztimes <- pmin(lifetimes, censtimes)
+status <- as.numeric(censtimes > lifetimes)
+group <- rep(c(0, 1), each=25)
+dat <- data.frame(lifetimes=lifetimes, censtimes=censtimes,
+                  ztimes=ztimes, status=status, group=group)
+fit <- survfit(Surv(dat$ztimes, dat$status) ~ dat$group, conf.int=.95)
+conf <- data.frame(upper=fit$upper, lower=fit$lower, group=dat$group)
+
+```
+
+-------
+
+# Models
+
+A good model is `DIED ~ BA + HT + CPOS + CANHT`, possibly with `PPLOT`, and it is slightly better with `HTOBS` instead of `HT` (`HT` includes predicted heights, sample size changes when using `HTOBS` instead).
+
+## Logistic
+```{r logistic}
+## Reactives/Observers
+getModelData <- reactive({
+    dat <- getData()
+    na.omit(dat[, c(input$logDied, input$indVars)])
+})
+
+getModel <- reactive({
+    dat <- getModelData()
+    form <- as.formula(paste(input$logDied, "~", paste(input$indVars, collapse="+")))
+    glm(form, data = dat, family=binomial(link=input$link))
+})
+
+observe({
+    updateRadioButtons(session, "xVar", choices=input$indVars, inline=TRUE)
+})
+
+## Output
+plotMod <- renderPlot({
+    x <- input$xVar
+    dat <- getModelData()
+    mod <- getModel()
+    dat$preds <- fitted(mod)
+    
+    ggplot(dat, aes_string(x, input$logDied)) + 
+      geom_point(position=position_jitter(height=0.05), alpha=0.5, col=cols[1]) +
+      geom_point(aes_string(x, "preds"), col=cols[2], alpha=0.5) +
+      geom_line(aes_string(x, "preds"), col=cols[2], alpha=0.5) + 
+      geom_hline(y=0.5, lty=2) + theme_bw() + 
+      ggtitle(paste(input$logDied, "vs", paste(input$indVars, collapse=",")))
+})
+
+plotHazard <- renderPlot({
+    x <- input$xVar
+    dat <- getData()
+    mod <- getModel()
+    dat$hazards <- log(1 - fitted(mod))
+    
+    plot(dat[,"hazards"] ~ dat[,x])
+    ## ggplot(dat, aes_string(x, "hazards")) +
+    ## ggplot(dat, aes_string(x, "DIED")) + 
+    ##     geom_point(position=position_jitter(height=0.05), alpha=0.5, col=cols[1]) +
+            ## geom_point(aes_string(x, "hazards"), col=cols[2], alpha=0.5) +
+            ##     geom_line(aes_string(x, "hazards"), col=cols[2], alpha=0.5) + 
+            ##         geom_hline(y=0.5, lty=2) + 
+            ##             ggtitle(paste("DIED vs", paste(input$indVars, collapse=",")))
+})
+
+shinyUI(fluidPage(
+    titlePanel("Fit logistic model"),
+    sidebarLayout(
+        sidebarPanel(
+            radioButtons("logDied", "Died Variable:", choices=c("DIED","rDIED"), selected="DIED", 
+                         inline=TRUE),
+            helpText("pg = 'Prior Growth'"),
+            checkboxGroupInput("indVars", "Predictors", 
+                               choices=c("BA", "BV", "ELEV", "HT", "HTOBS", "CPOS", "CANHT", 
+                                         "pgBA", "pgBV", "pgHT", "PPLOT"), 
+                               selected=c("BA", "HT", "CPOS", "CANHT"),
+                               inline=TRUE),
+            radioButtons("xVar", "X-axis Variable:",
+                         choices=c("BA", "BV", "ELEV", "HT", "CPOS", "CANHT", "HTOBS",
+                                   "pgBA", "pgBV", "pgHT"), selected=c("BA"),
+                         inline=TRUE),
+            radioButtons("link", "Link function:",
+                         choices=c("cloglog", "logit", "probit"), inline=TRUE)
+        ),
+    
+        mainPanel(
+            tabsetPanel(
+                id = "tabs1",
+                tabPanel("Probabilities", plotMod),
+                tabPanel("Hazards(Not Working)", plotHazard)
+            )
+        )
+    )
+))
+
+```
+
+### Logistic model statistics
+A good [summary](http://stats.stackexchange.com/questions/108995/interpreting-residual-and-null-deviance-in-glm-r) of how to interpret Null and Residual deviance.  Basically, the Null model has one parameter, while the Residual model is the fitted model.  The residual deviance will be about -2*log-likelihood, and a greater difference between the Null deviance and the Residual deviance is a good sign that the predictors are meaningful, and small deviances mean good fit.  The Residual deviance - Null deviance should be roughly Chi-square (asymptotic) with df = residual df - null df.
+
+```{r model_stats}
+actionButton("logResults", "Show Logistic Model Results")
+renderPrint({
+    if (input$logResults %% 2) {
+        mod <- getModel()
+        print(summary(mod))
+    } 
+})
+
+```
+
+
+## Cox Proportional Hazards Models

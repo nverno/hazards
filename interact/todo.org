@@ -1,0 +1,2 @@
+- Correlation between predictors and grouping variable.
+- How to simulate appropriate data.

@@ -1,0 +1,8 @@
+.#*
+*.html
+data
+temp
+treedata
+Figs
+
+!.gitignore

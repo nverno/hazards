@@ -1,0 +1,59 @@
+---
+title: "Testing"
+date: "Generated: `r Sys.Date()`"
+runtime: shiny
+output:
+   html_document:
+   toc: true
+   toc_depth: 3
+   theme: spacelab
+   highlight: zenburn
+   number_sections: false
+---
+
+```{r opts, include=FALSE}
+
+knitr::opts_chunk$set(fig.path="Figs/", echo=FALSE, warning=FALSE,
+                      message=FALSE, dev='svg')
+
+```
+
+
+```{r a}
+
+numericInput("n", "N:", 0, 5, 3)
+conditionalPanel(
+    condition = "input.n == 3",
+    div(style="display:inline-block",
+        selectInput("a", "A", choices=1:10)),
+    div(style="display:inline-block",
+        tags$label('Menu2', `for` = 'Sample1'), 
+        tags$select(id = 'Sample1', class="input-small",
+                    tagList(mapply(tags$option, 1:2, paste0(c("a", "b"), 1:2),
+                                   SIMPLIFY=FALSE))))
+)
+
+```
+
+<script type="text/javascript"> 
+function swap(one, two) { 
+document.getElementById(one).style.display = 'block'; 
+document.getElementById(two).style.display = 'none'; 
+} 
+</script> 
+
+```{r b} 
+renderPrint({ 
+    ## tags$head(tags$script(src="swap.js")) 
+}) 
+``` 
+<button onClick="replaceContentInContainer('target', 'replace_target')">View Portfolio</button> 
+<button onClick="replaceContentInOtherContainer('replace_target', 'target')">View Results</button> 
+
+<div> 
+<span id="target">div1</span> 
+</div> 
+
+<div style="display:none"> 
+<span id="replace_target">div2</span> 
+</div> 

@@ -1,0 +1,10 @@
+* Notes
+
+Hazard analysis for trees from doug fir forests in British Columbia and high elevation spruce/fir forests from Mt. Moosilauke.
+
+* Issues
+** rGR
+still correlation between rGR and LRS
+** LRS 
+is calculated at the end of the period instead of the beginning when creating
+hazard data set.
